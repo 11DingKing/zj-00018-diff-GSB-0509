@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  postgres:
+    container_name: zj-00018-postgres
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev123456
+      POSTGRES_DB: db_zj_00018
+    ports:
+      - "15018:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d db_zj_00018"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    container_name: zj-00018-redis
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "redis123456"]
+    ports:
+      - "14018:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis123456", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    container_name: zj-00018-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "13018:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://dev:dev123456@postgres:5432/db_zj_00018
+      REDIS_URL: redis://:redis123456@redis:6379
+      JWT_SECRET: mini-gerrit-jwt-secret-key
+      PORT: 3000
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
+
+  frontend:
+    container_name: zj-00018-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "16018:5173"
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:13018
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,218 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum ChangeStatus {
+  Draft
+  Open
+  Review
+  Merged
+  Abandoned
+}
+
+enum VoteValue {
+  V2_NEG
+  V1_NEG
+  V0
+  V1_POS
+  V2_POS
+}
+
+enum CheckStatus {
+  Pending
+  Running
+  Passed
+  Failed
+}
+
+enum NotificationType {
+  REVIEWER_ADDED
+  COMMENT_ADDED
+  VOTE_CHANGED
+  CHANGE_STATUS_CHANGED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  changes          Change[]          @relation("ChangeAuthor")
+  authoredComments Comment[]         @relation("CommentAuthor")
+  votes            Vote[]
+  changeReviewers  ChangeReviewer[]
+  notifications    Notification[]
+}
+
+model Repository {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branches Branch[]
+  changes  Change[]
+}
+
+model Branch {
+  id           String   @id @default(cuid())
+  name         String
+  repositoryId String
+  createdAt    DateTime @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, name])
+}
+
+model Change {
+  id            String       @id @default(cuid())
+  title         String
+  description   String
+  status        ChangeStatus @default(Draft)
+  repositoryId  String
+  authorId      String
+  sourceBranch  String
+  targetBranch  String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  repository     Repository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  author         User             @relation("ChangeAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  patchsets      Patchset[]
+  reviewers      ChangeReviewer[]
+  comments       Comment[]
+  votes          Vote[]
+  checks         Check[]
+
+  @@index([repositoryId])
+  @@index([authorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ChangeReviewer {
+  id        String   @id @default(cuid())
+  changeId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  change Change @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([changeId, userId])
+}
+
+model Patchset {
+  id          String   @id @default(cuid())
+  changeId    String
+  number      Int
+  message     String?
+  createdAt   DateTime @default(now())
+
+  change    Change       @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  diffFiles DiffFile[]
+  votes     Vote[]
+
+  @@unique([changeId, number])
+}
+
+model DiffFile {
+  id         String   @id @default(cuid())
+  patchsetId String
+  filePath   String
+  diffText   String   @db.Text
+  status     String   // added, modified, deleted, renamed
+  createdAt  DateTime @default(now())
+
+  patchset Patchset @relation(fields: [patchsetId], references: [id], onDelete: Cascade)
+  comments Comment[]
+}
+
+model Comment {
+  id           String     @id @default(cuid())
+  changeId     String
+  diffFileId   String?
+  authorId     String
+  parentId     String?
+  content      String     @db.Text
+  lineNumber   Int?
+  side         String?    // left, right
+  resolved     Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  change   Change   @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  diffFile DiffFile? @relation(fields: [diffFileId], references: [id], onDelete: SetNull)
+  author   User     @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  parent   Comment? @relation("CommentParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children Comment[] @relation("CommentParent")
+
+  @@index([changeId])
+  @@index([diffFileId])
+  @@index([parentId])
+}
+
+model Vote {
+  id         String    @id @default(cuid())
+  changeId   String
+  patchsetId String
+  userId     String
+  value      VoteValue @default(V0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  change   Change   @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  patchset Patchset @relation(fields: [patchsetId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([changeId, patchsetId, userId])
+}
+
+model Check {
+  id         String      @id @default(cuid())
+  changeId   String
+  name       String
+  status     CheckStatus @default(Pending)
+  message    String?
+  isRequired Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  change Change @relation(fields: [changeId], references: [id], onDelete: Cascade)
+
+  @@unique([changeId, name])
+}
+
+model Notification {
+  id              String           @id @default(cuid())
+  userId          String
+  type            NotificationType
+  changeId        String?
+  message         String           @db.Text
+  read            Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
